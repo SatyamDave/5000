@@ -202,8 +202,15 @@ shown edge. To replace it, implement the `Strategy` interface in `src/strategy/t
   - `get_equity_quotes` and `get_equity_tradability`, for real symbols.
 - An unknown symbol is dropped, not zero-filled.
 
+**Previewed with Robinhood's own pre-trade check (`review_equity_order`, 2026-09-29, nothing placed).**
+All four order shapes Fifty sends were accepted with no alerts:
+- the dollar-amount market buy;
+- the whole-share marketable limit buy;
+- the `stop_market` protective sell;
+- the fractional market sell.
+
 **Verified in simulation only.** The simulated server enforces the real input schemas and answers
-in the real output shapes. 41 tests cover:
+in the real output shapes. 43 tests cover:
 - wrong account and overspending;
 - duplicate and ambiguous submission;
 - partial fills and restart recovery;
@@ -214,7 +221,9 @@ in the real output shapes. 41 tests cover:
 - baseline protection, exposure-after-close recovery, and the model spend cap.
 
 **Not verified. No live order has ever been sent:**
-- the real response to `place_equity_order` and `cancel_equity_order`;
+- the real response to `place_equity_order` and `cancel_equity_order`. If a live order response has an
+  unexpected shape, entries stop. The sell-off falls back to the broker's own position numbers,
+  selling whatever is held above the pre-session baseline; this is tested in simulation;
 - real fill, partial-fill and fee reporting on dollar-based and stop orders;
 - that Robinhood deduplicates on `ref_id` as its tool description says;
 - positions with real holdings (field shapes come from the output schema only);

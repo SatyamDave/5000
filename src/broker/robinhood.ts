@@ -338,10 +338,24 @@ export class Robinhood {
     });
   }
 
-  /** Agentic orders in the account created at or after `sinceIso`. */
+  /** Why rows of the last orders() call could not be parsed (empty when all parsed). */
+  unparsed: string[] = [];
+
+  /** Agentic orders in the account created at or after `sinceIso`. A row that does not parse is
+   *  skipped and recorded in `unparsed` (the engine blocks entries on it) instead of hiding every
+   *  other order, so exits keep working if one live response has an unexpected shape. */
   async orders(sinceIso: string): Promise<BrokerOrder[]> {
     const rows = await this.paged("get_equity_orders", { account_number: this.account, created_at_gte: sinceIso, placed_agent: "agentic" }, "orders");
-    return rows.map((o) => parseOrder("get_equity_orders", o));
+    this.unparsed = [];
+    const out: BrokerOrder[] = [];
+    for (const o of rows) {
+      try {
+        out.push(parseOrder("get_equity_orders", o));
+      } catch (err) {
+        this.unparsed.push(`${String(o.symbol ?? "?")}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return out;
   }
 
   async order(id: string): Promise<BrokerOrder | undefined> {

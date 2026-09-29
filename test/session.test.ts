@@ -311,3 +311,33 @@ test("universe_lists: an unknown list name fails precheck instead of trading not
   assert.equal(state.phase, "PRECHECK");
   assert.equal(placements(mock.calls).length, 0);
 });
+
+test("unexpected live order shape after a fill: entries stop, and the sell-off still flattens via broker positions", async () => {
+  freshStateDir();
+  const cfg = testConfig((c) => { c.strategy.max_entries_per_session = 1; c.execution.broker_stop_orders = false; c.strategy.stop_loss_pct = 50; c.strategy.take_profit_pct = 90; });
+  let corruptFrom = 0;
+  const { state, mock, engine } = await simulate({ cfg, date: DAY, pricePath: rising(OPEN), quiet: true,
+    onStep: (now, m) => {
+      if (!corruptFrom && m.orders.some((o) => o.side === "buy" && o.state === "filled")) corruptFrom = now;
+      m.faults.corruptOrderState = corruptFrom > 0;
+    } });
+  assert.ok(corruptFrom > 0, "an entry filled");
+  const ev = journal(engine.store.dir);
+  assert.ok(ev.some((e) => e.event === "unparsed_broker_orders" || (e.event === "broker_error")));
+  for (const q of mock.positions.values()) assert.ok(q < 1e-9, "position was sold despite unreadable order records");
+  assert.equal(mock.orders.filter((o) => o.side === "buy").length, 1, "no new entries while order records were unreadable");
+  assert.equal(state.phase === "COMPLETE" || state.phase === "RECOVERY_WAIT", true);
+});
+
+test("orders endpoint down for the whole afternoon: degraded sell-off still flattens before the close", async () => {
+  freshStateDir();
+  const cfg = testConfig((c) => { c.strategy.max_entries_per_session = 1; c.execution.broker_stop_orders = true; c.strategy.stop_loss_pct = 50; c.strategy.take_profit_pct = 90; });
+  const brokenFrom = OPEN + 3 * 3600_000;
+  const { mock, engine } = await simulate({ cfg, date: DAY, pricePath: rising(OPEN), holdings: { SIMF: 2 }, quiet: true,
+    onStep: (now, m) => { m.faults.ordersBroken = now >= brokenFrom; } });
+  assert.ok(mock.orders.some((o) => o.side === "buy" && o.filled > 0), "an entry filled before the outage");
+  const ev = journal(engine.store.dir);
+  assert.ok(ev.some((e) => e.event === "degraded_flatten"));
+  for (const [sym, q] of mock.positions) assert.ok(sym === "SIMF" ? Math.abs(q - 2) < 1e-6 : q < 1e-9, `${sym}=${q}`);
+  for (const o of mock.orders.filter((x) => x.side === "sell")) assert.ok(Date.parse(o.created_at) < CLOSE);
+});

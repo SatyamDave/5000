@@ -27,6 +27,10 @@ export interface MockFaults {
   networkDown?: boolean;
   /** Quotes carry venue timestamps this many ms in the past. */
   quoteLagMs?: number;
+  /** Orders render with a state the client has never seen (an unexpected live shape). */
+  corruptOrderState?: boolean;
+  /** get_equity_orders answers with a tool error every time. */
+  ordersBroken?: boolean;
   /** Market orders never fill (e.g. halted/illiquid); they stay open until cancelled. */
   noFills?: boolean;
 }
@@ -203,6 +207,7 @@ export class MockRobinhood {
           };
         }), next: "" });
       case "get_equity_orders": {
+        if (this.faults.ordersBroken) return this.err("SIMULATED: orders endpoint unavailable");
         let rows = this.orders;
         if (typeof args.order_id === "string") rows = rows.filter((o) => o.id === args.order_id);
         if (typeof args.created_at_gte === "string") rows = rows.filter((o) => o.created_at >= (args.created_at_gte as string));
@@ -339,7 +344,7 @@ export class MockRobinhood {
 
   render(o: MockOrder): Record<string, unknown> {
     return {
-      id: o.id, instrument_id: `inst-${o.symbol}`, symbol: o.symbol, side: o.side, type: o.type, state: o.state,
+      id: o.id, instrument_id: `inst-${o.symbol}`, symbol: o.symbol, side: o.side, type: o.type, state: this.faults.corruptOrderState ? "some_new_state" : o.state,
       quantity: o.quantity === null ? (o.filled > 0 ? s6(o.filled) : null) : s6(o.quantity), cumulative_quantity: s6(o.filled),
       price: o.price === null ? null : s6(o.price), stop_price: o.stop_price === null ? null : s6(o.stop_price),
       average_price: o.avg === null ? null : s6(o.avg), fees: s6(o.fees),

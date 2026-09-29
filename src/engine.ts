@@ -268,6 +268,10 @@ export class Engine {
       await this.resolveUnknown(rh, brokerOrders);
       const claimed = new Set(this.s.orders.map((o) => o.brokerId).filter(Boolean));
       const flags: string[] = [];
+      if (rh.unparsed.length) {
+        flags.push(`unparsed_broker_orders:${rh.unparsed.length}`);
+        this.log("unparsed_broker_orders", { errors: rh.unparsed.slice(0, 5) });
+      }
       const foreign = brokerOrders.filter((b) => !claimed.has(b.id) && Date.parse(b.createdAt) >= this.s.startedAt && b.status === "open");
       if (foreign.length) flags.push(`foreign_open_agentic_orders:${foreign.map((f) => f.symbol).join("/")}`);
 
@@ -397,7 +401,17 @@ export class Engine {
 
   private async tick(sess: Session, c: Controls): Promise<void> {
     const cfg = this.d.cfg;
-    if (!(await this.reconcile())) return; // nothing new is sent while broker state is unknown
+    const cutoff = sess.closeMs - cfg.session.entry_cutoff_minutes_before_close * MINUTE;
+    const flattenAt = sess.closeMs - cfg.session.flatten_minutes_before_close * MINUTE;
+    // The clock moves the phase, not broker health: an outage must not keep us in ACTIVE.
+    if (this.s.phase === "ACTIVE" && this.now >= cutoff) this.goto("WIND_DOWN");
+    const flattenAll = this.s.recovery || c.flatten || (this.s.phase === "WIND_DOWN" && this.now >= flattenAt);
+    if (!(await this.reconcile())) {
+      // Nothing new is sent while broker state is unknown -- except the end-of-day sell-off,
+      // which falls back to the broker's own position numbers when order records can't be read.
+      if (flattenAll) await this.degradedFlatten();
+      return;
+    }
     if (this.trad.size === 0 && !this.s.recovery) {
       // After a restart the in-memory tradability cache is empty; reload before any entry.
       try {
@@ -416,9 +430,6 @@ export class Engine {
       this.brokerFailed(err, "quotes");
       return;
     }
-    const cutoff = sess.closeMs - cfg.session.entry_cutoff_minutes_before_close * MINUTE;
-    const flattenAt = sess.closeMs - cfg.session.flatten_minutes_before_close * MINUTE;
-    if (this.s.phase === "ACTIVE" && this.now >= cutoff) this.goto("WIND_DOWN");
 
     // Entry orders: cancelled when stale, when killed, and in wind-down.
     for (const o of this.s.orders.filter((x) => x.purpose === "entry" && x.status === "open")) {
@@ -427,9 +438,10 @@ export class Engine {
       else if (this.now - o.submittedAt > cfg.execution.entry_order_ttl_seconds * 1000) await this.cancel(o, "entry ttl");
     }
 
-    // Exits.
-    const flattenAll = this.s.recovery || c.flatten || (this.s.phase === "WIND_DOWN" && this.now >= flattenAt);
-    for (const sym of held) {
+    // Exits. The sell-off also covers shares the broker shows above the baseline that the order
+    // records don't explain (e.g. a fill whose response could not be parsed).
+    const exitSymbols = flattenAll ? [...new Set([...held, ...this.brokerExcess().keys()])] : held;
+    for (const sym of exitSymbols) {
       const plan = this.s.exits[sym];
       const q = this.quotes.get(sym);
       const fresh = !quoteProblem(q, { ...cfg, execution: { ...cfg.execution, max_spread_pct: 100 } }, this.now);
@@ -437,7 +449,7 @@ export class Engine {
       if (flattenAll) why = this.s.recovery ? "recovery flatten" : c.flatten ? "manual flatten" : "session wind-down";
       else if (plan && fresh && q!.bid <= plan.stopPrice) why = `stop ${plan.stopPrice} hit (bid ${q!.bid})`;
       else if (plan && fresh && q!.bid >= plan.targetPrice) why = `target ${plan.targetPrice} hit (bid ${q!.bid})`;
-      if (why) await this.exit(sym, b, why);
+      if (why) await this.exit(sym, b, why, flattenAll);
       else if (plan && cfg.execution.broker_stop_orders && this.s.phase === "ACTIVE") await this.ensureBrokerStop(sym, b, plan.stopPrice);
     }
 
@@ -531,7 +543,7 @@ export class Engine {
 
   /** Sell everything the experiment holds in `sym`. A resting broker stop is cancelled first and
    *  must be confirmed cancelled (or filled) before the market sell goes out. */
-  private async exit(sym: string, b: Books, why: string): Promise<void> {
+  private async exit(sym: string, b: Books, why: string, flatten = false): Promise<void> {
     const sells = this.s.orders.filter((o) => o.symbol === sym && o.side === "sell" && OPEN_STATUSES.has(o.status));
     if (sells.some((o) => o.purpose === "exit")) return; // already exiting
     // A refused exit is retried once a minute, not every tick; after 3 refusals a human is told.
@@ -545,7 +557,7 @@ export class Engine {
       return; // next tick, after the cancel is confirmed by reconcile
     }
     const avail = this.brokerPositions.get(sym)?.available ?? 0;
-    const qty = sizeExit(sym, b, avail);
+    const qty = flatten ? (this.brokerExcess().get(sym) ?? 0) : sizeExit(sym, b, avail);
     if (qty <= 0) {
       this.log("exit_blocked", { symbol: sym, why, note: "no sellable shares reported by broker (held for other orders?)" });
       return;
@@ -553,6 +565,38 @@ export class Engine {
     const q = this.quotes.get(sym);
     this.log("exit", { symbol: sym, why, qty });
     await this.submit(this.newOrder("exit", { symbol: sym, side: "sell", type: "market", quantity: dec(qty, 6), time_in_force: "gfd" }, 0, { decisionMid: q ? (q.bid + q.ask) / 2 : undefined }));
+  }
+
+  /** Shares per symbol the broker shows above the pre-session baseline, capped at what is
+   *  sellable now. Never touches baseline holdings; never more than the broker will let us sell. */
+  private brokerExcess(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const [sym, p] of this.brokerPositions) {
+      const excess = Math.min(p.available, p.quantity - (this.s.baseline?.[sym] ?? 0));
+      const q = Math.floor(excess * 1e6 + 1e-6) / 1e6;
+      if (q > 0) out.set(sym, q);
+    }
+    return out;
+  }
+
+  /** Sell-off when order reconciliation keeps failing: cancel our known resting stops, then sell
+   *  the broker-reported excess over baseline with market orders, at most once a minute per symbol. */
+  private async degradedFlatten(): Promise<void> {
+    let positions: Position[];
+    try {
+      positions = await (await this.client()).positions();
+    } catch (err) {
+      this.brokerFailed(err, "degraded flatten positions");
+      return;
+    }
+    this.brokerPositions = new Map(positions.map((p) => [p.symbol, p]));
+    for (const o of this.s.orders.filter((x) => x.purpose === "stop" && OPEN_STATUSES.has(x.status))) await this.cancel(o, "degraded flatten");
+    for (const [sym, qty] of this.brokerExcess()) {
+      const recent = this.s.orders.some((o) => o.symbol === sym && o.purpose === "exit" && this.now - o.submittedAt < MINUTE);
+      if (recent) continue;
+      this.log("degraded_flatten", { symbol: sym, qty, note: "order records unreadable; selling broker-reported shares above baseline" });
+      await this.submit(this.newOrder("exit", { symbol: sym, side: "sell", type: "market", quantity: dec(qty, 6), time_in_force: "gfd" }, 0));
+    }
   }
 
   // ---------------------------------------------------------------- end of session
