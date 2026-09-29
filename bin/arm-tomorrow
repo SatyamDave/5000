@@ -7,9 +7,20 @@ DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 LOADER="file://$DIR/node_modules/tsx/dist/loader.mjs"
 CFG="${FIFTY_CONFIG:-$DIR/config/fifty.json}"
-export FIFTY_TOKEN_PATH="${FIFTY_TOKEN_PATH:-$HOME/.config/fall_forward_labs/robinhood-oauth.json}"
+[ -d node_modules ] || { echo "Installing pinned dependencies (npm ci --ignore-scripts)..."; npm ci --ignore-scripts --no-audit --no-fund; }
 
-[ -f "$FIFTY_TOKEN_PATH" ] || { echo "No Robinhood sign-in at $FIFTY_TOKEN_PATH. Run: ./bin/fifty login"; exit 1; }
+# Sign-in: FIFTY_TOKEN_PATH if set, else Fifty's own (~/.config/fifty), else an existing
+# fall_forward_labs sign-in; if none exists, sign in now (opens Robinhood in the browser).
+if [ -z "${FIFTY_TOKEN_PATH:-}" ]; then
+  if [ -f "$HOME/.config/fifty/robinhood-oauth.json" ]; then FIFTY_TOKEN_PATH="$HOME/.config/fifty/robinhood-oauth.json"
+  elif [ -f "$HOME/.config/fall_forward_labs/robinhood-oauth.json" ]; then FIFTY_TOKEN_PATH="$HOME/.config/fall_forward_labs/robinhood-oauth.json"
+  else FIFTY_TOKEN_PATH="$HOME/.config/fifty/robinhood-oauth.json"; fi
+fi
+export FIFTY_TOKEN_PATH
+if [ ! -f "$FIFTY_TOKEN_PATH" ]; then
+  echo "No Robinhood sign-in yet. Opening Robinhood sign-in in your browser; finish Agentic onboarding there."
+  ./bin/fifty login
+fi
 [ -f "$CFG" ] || cp config/fifty.example.json "$CFG"
 
 DATE="${1:-$(node --import "$LOADER" -e '
@@ -20,7 +31,8 @@ import("./src/calendar.ts").then((c) => {
 echo "Session to arm: $DATE"
 
 echo
-echo "Agentic account number (the one ending 6993; letters/digits only; input hidden; Enter keeps current):"
+echo "Your Agentic account number: Robinhood app > Agentic account > Settings > Account information."
+echo "(letters/digits only; input hidden; Enter keeps current; doctor rejects a number that is not your agentic account):"
 read -r -s ACCT
 echo
 echo "Tickers it may trade, comma separated (e.g. XYZ,QRS)."

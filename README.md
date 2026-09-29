@@ -29,7 +29,18 @@ next open → REPORT → COMPLETE`.
 
 Foundation choice and pinned commits: [docs/foundation.md](docs/foundation.md).
 
-## Setup (once)
+## Quick start (new user)
+
+```bash
+git clone https://github.com/SatyamDave/5000.git ~/fifty && cd ~/fifty && npm ci --ignore-scripts && ./bin/arm-tomorrow
+```
+
+`arm-tomorrow` does the whole setup in one go. If there's no sign-in yet, it signs you in. It then
+asks for your account number and tickers (Enter = Robinhood's lists) and runs `doctor`. It arms
+only after you type `ARM <date>`, then schedules the Mac to wake. If Claude is helping you set up,
+point it at [CLAUDE.md](CLAUDE.md).
+
+## Setup (once, step by step)
 
 ```bash
 cd ~/real_trade && npm ci --ignore-scripts
