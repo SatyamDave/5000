@@ -1,0 +1,4 @@
+#!/bin/sh
+# fifty CLI. Runs src/cli.ts through the project's pinned tsx loader.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec node --import "file://$DIR/node_modules/tsx/dist/loader.mjs" "$DIR/src/cli.ts" "$@"

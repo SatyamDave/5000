@@ -1,0 +1,4 @@
+node_modules/
+state/
+*.log
+config/fifty.json

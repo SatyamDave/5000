@@ -1,0 +1,47 @@
+{
+  "boundaries": {
+    "account_number": "REPLACEME",
+    "initial_capital_usd": 50,
+    "asset_classes": ["equity"],
+    "model_spend_limit_usd": 2,
+    "cash_reserve_usd": 0.5
+  },
+  "target_usd": 5000,
+  "universe": ["REPLACE", "WITH", "YOUR", "SYMBOLS"],
+  "strategy": {
+    "name": "opening-range-breakout",
+    "watchlist_size": 5,
+    "opening_range_minutes": 15,
+    "breakout_buffer_pct": 0.1,
+    "position_size_pct": 100,
+    "max_open_positions": 1,
+    "max_entries_per_session": 6,
+    "stop_loss_pct": 2,
+    "take_profit_pct": 6,
+    "min_seconds_between_entries": 120
+  },
+  "model": {
+    "decider": "none",
+    "model_id": "claude-opus-5-5",
+    "max_calls": 40,
+    "usd_per_mtok_input": 4,
+    "usd_per_mtok_output": 20
+  },
+  "execution": {
+    "poll_seconds": 15,
+    "quote_max_age_seconds": 20,
+    "max_spread_pct": 0.5,
+    "limit_collar_pct": 0.2,
+    "entry_order_ttl_seconds": 60,
+    "call_timeout_ms": 15000,
+    "unknown_order_resolve_seconds": 180,
+    "broker_stop_orders": true,
+    "prefer_whole_shares": true
+  },
+  "session": {
+    "precheck_minutes_before_open": 30,
+    "entry_cutoff_minutes_before_close": 30,
+    "flatten_minutes_before_close": 15,
+    "recovery_flatten_next_session": true
+  }
+}
