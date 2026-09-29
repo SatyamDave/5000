@@ -1,0 +1,72 @@
+#!/bin/bash
+# One shot: fill config -> doctor -> arm the next session -> schedule wake -> status.
+# You type the account number, the tickers and the ARM confirmation; nothing is guessed.
+# Usage: ./bin/arm-tomorrow [YYYY-MM-DD]
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$DIR"
+LOADER="file://$DIR/node_modules/tsx/dist/loader.mjs"
+CFG="${FIFTY_CONFIG:-$DIR/config/fifty.json}"
+export FIFTY_TOKEN_PATH="${FIFTY_TOKEN_PATH:-$HOME/.config/fall_forward_labs/robinhood-oauth.json}"
+
+[ -f "$FIFTY_TOKEN_PATH" ] || { echo "No Robinhood sign-in at $FIFTY_TOKEN_PATH. Run: ./bin/fifty login"; exit 1; }
+[ -f "$CFG" ] || cp config/fifty.example.json "$CFG"
+
+DATE="${1:-$(node --import "$LOADER" -e '
+import("./src/calendar.ts").then((c) => {
+  const d = c.nyDate(Date.now()), s = c.sessionOn(d);
+  console.log(s && Date.now() < s.openMs - 35 * 60e3 ? d : c.nextSessionAfter(d).date);
+});')}"
+echo "Session to arm: $DATE"
+
+echo
+echo "Agentic account number (the one ending 6993; letters/digits only; input hidden; Enter keeps current):"
+read -r -s ACCT
+echo
+echo "Tickers it may trade, comma separated (e.g. XYZ,QRS; Enter keeps current):"
+read -r TICKERS
+
+ACCT="$ACCT" TICKERS="$TICKERS" python3 - "$CFG" <<'EOF'
+import json, os, re, sys
+path = sys.argv[1]
+c = json.load(open(path))
+acct = os.environ["ACCT"].strip()
+if acct:
+    c["boundaries"]["account_number"] = acct
+acct = c["boundaries"]["account_number"]
+if not re.fullmatch(r"[A-Za-z0-9]+", acct) or "REPLACE" in acct or acct == "YOUR_FULL_NUMBER":
+    sys.exit("account number must be letters/digits only (no spaces, dashes or placeholders)")
+t = [s.strip().upper() for s in os.environ["TICKERS"].split(",") if s.strip()]
+if t:
+    c["universe"] = t
+bad = [s for s in c["universe"] if not re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", s) or s in ("REPLACE", "WITH", "YOUR", "SYMBOLS", "AAA", "BBB", "CCC")]
+if bad or not c["universe"]:
+    sys.exit(f"replace placeholder/invalid tickers: {bad or 'none given'}")
+with open(path, "w") as f:
+    json.dump(c, f, indent=2)
+    f.write("\n")
+os.chmod(path, 0o600)
+print(f"config saved: account ••••{acct[-4:]}, universe {', '.join(c['universe'])}")
+EOF
+
+echo
+echo "== doctor (read-only) =="
+./bin/fifty doctor --date "$DATE" || { echo; echo "Doctor failed; fix the FAIL lines above and re-run ./bin/arm-tomorrow"; exit 1; }
+
+echo
+echo "== arm =="
+./bin/fifty arm-session --date "$DATE"
+
+WAKE="$(node --import "$LOADER" -e '
+import("./src/calendar.ts").then((c) => {
+  const d = new Date(c.sessionOn(process.argv[1]).openMs - 40 * 60e3), p = (n) => String(n).padStart(2, "0");
+  console.log(`${p(d.getMonth() + 1)}/${p(d.getDate())}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:00`);
+});' "$DATE")"
+echo
+echo "== scheduling wake at $WAKE (local time; asks for your Mac password) =="
+sudo pmset schedule wake "$WAKE" || echo "Wake not scheduled. Keep the Mac awake, plugged in, lid open."
+
+echo
+./bin/fifty status
+echo
+echo "Armed for $DATE. Leave the Mac plugged in with the lid open. Watch: ./bin/fifty status   Kill: ./bin/fifty stop --flatten"
