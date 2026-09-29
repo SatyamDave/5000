@@ -8,7 +8,7 @@ import { realTools } from "./broker/mock-server.js";
 import { connect, READ_TOOLS, Robinhood, TRADE_TOOLS } from "./broker/robinhood.js";
 import { login, readStoredAuth, tokenPath } from "./broker/robinhood-oauth.js";
 import { isoNy, nextSessionAfter, nyDate, sessionOn } from "./calendar.js";
-import { configPath, loadConfig, parseConfig, ROBINHOOD_MCP_URL } from "./config.js";
+import { configPath, loadConfig, MAX_UNIVERSE, parseConfig, ROBINHOOD_MCP_URL } from "./config.js";
 import type { Config } from "./config.js";
 import { claudeReviewer } from "./decider/claude.js";
 import { Engine, realClock } from "./engine.js";
@@ -58,7 +58,7 @@ function summary(cfg: Config, date: string, sha: string): string {
     `  account:          ${mask(cfg.boundaries.account_number)} (must be agentic_allowed; verified at precheck)`,
     `  capital:          $${cfg.boundaries.initial_capital_usd} contributed; no deposits, transfers, borrowing or top-ups; realized gains reinvested`,
     `  asset scope:      ${cfg.boundaries.asset_classes.join(", ")} (long only; no options, no crypto, no shorts)`,
-    `  universe:         ${cfg.universe.join(", ")}`,
+    `  universe:         ${[...cfg.universe, ...cfg.universe_lists.map((l) => `Robinhood list "${l}" (resolved at precheck)`)].join(", ")}`,
     `  session:          ${date} ${isoNy(sess.openMs)} to ${isoNy(sess.closeMs)}${sess.earlyClose ? " (EARLY CLOSE)" : ""}`,
     `  precheck starts:  ${isoNy(sess.openMs - cfg.session.precheck_minutes_before_open * 60_000)}`,
     `  strategy:         ${cfg.strategy.name}; ${cfg.strategy.position_size_pct}% of experiment cash per entry, max ${cfg.strategy.max_open_positions} open, max ${cfg.strategy.max_entries_per_session} entries`,
@@ -140,13 +140,16 @@ async function doctor(): Promise<number> {
       line(pos.some((p) => p.quantity < 0) ? FAIL : PASS, "positions", `${pos.length} existing (kept as baseline, never sold)`);
       const open = (await rh.orders(new Date(Date.now() - 7 * 86_400_000).toISOString())).filter((o) => o.status === "open");
       line(open.length ? WARN : PASS, "open agentic orders", String(open.length));
-      const trad = await rh.tradability(cfg.universe, acct.brokerageType);
+      const fromLists = await rh.listSymbols(cfg.universe_lists);
+      const universe = [...new Set([...cfg.universe, ...fromLists])].slice(0, MAX_UNIVERSE);
+      line(universe.length ? PASS : FAIL, "universe", `${universe.length} symbols${cfg.universe_lists.length ? ` (${fromLists.length} from ${cfg.universe_lists.join(", ")} right now; re-resolved at precheck)` : ""}: ${universe.join(",")}`);
+      const trad = await rh.tradability(universe, acct.brokerageType);
       const bad = trad.filter((t) => !t.tradeable || t.halted || !t.accountTypeOk).map((t) => t.symbol);
-      const unresolved = cfg.universe.filter((s) => !trad.some((t) => t.symbol === s));
-      line(bad.length || unresolved.length ? WARN : PASS, "tradability", `${trad.filter((t) => t.fractional).length}/${cfg.universe.length} fractional${bad.length ? `; not tradeable now: ${bad.join(",")}` : ""}${unresolved.length ? `; unresolved: ${unresolved.join(",")}` : ""}`);
-      const quotes = await rh.quotes(cfg.universe);
+      const unresolved = universe.filter((s) => !trad.some((t) => t.symbol === s));
+      line(bad.length || unresolved.length ? WARN : PASS, "tradability", `${trad.filter((t) => t.fractional).length}/${universe.length} fractional${bad.length ? `; not tradeable now: ${bad.join(",")}` : ""}${unresolved.length ? `; unresolved: ${unresolved.join(",")}` : ""}`);
+      const quotes = await rh.quotes(universe);
       const ages = quotes.map((q) => Math.round((Date.now() - q.asOfMs) / 1000));
-      line(PASS, "quotes", `${quotes.length}/${cfg.universe.length} returned; freshest ${Math.min(...ages)}s old (stale outside market hours is expected)`);
+      line(PASS, "quotes", `${quotes.length}/${universe.length} returned; freshest ${Math.min(...ages)}s old (stale outside market hours is expected)`);
     } catch (err) {
       line(FAIL, "robinhood read-only check", err instanceof Error ? err.message.slice(0, 400) : String(err));
     } finally {
@@ -166,9 +169,17 @@ async function doctor(): Promise<number> {
 }
 
 async function simulateCmd(): Promise<number> {
-  const base = existsSync(configPath()) ? loadConfig().config : parseConfig(readFileSync(path.join(projectRoot(), "config", "fifty.example.json"), "utf8"));
-  const universe = base.universe.some((s) => /REPLACE|WITH|YOUR|SYMBOLS/.test(s)) ? ["SIMA", "SIMB", "SIMC", "SIMD", "SIME", "SIMF"] : base.universe;
-  const cfg = simConfig({ ...base, universe, model: { ...base.model, decider: "none" } });
+  const example = () => parseConfig(readFileSync(path.join(projectRoot(), "config", "fifty.example.json"), "utf8"));
+  let base: Config;
+  try {
+    base = existsSync(configPath()) ? loadConfig().config : example();
+  } catch {
+    console.log(`note: ${configPath()} is incomplete or invalid; simulating with config/fifty.example.json settings`);
+    base = example();
+  }
+  // The simulated broker knows only synthetic symbols; list names resolve to its one list.
+  const universe = ["SIMA", "SIMB", "SIMC", "SIMD", "SIME", "SIMF"];
+  const cfg = simConfig({ ...base, universe: base.universe_lists.length ? [] : universe, universe_lists: base.universe_lists.length ? ["Sim movers"] : [], model: { ...base.model, decider: "none" } });
   const date = opt("date") ?? nextSessionAfter(nyDate(Date.now())).date;
   const dir = mkdtempSync(path.join(stateDir(), "sim-"));
   process.env.FIFTY_STATE_DIR = dir;

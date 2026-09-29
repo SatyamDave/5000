@@ -20,6 +20,7 @@ export function testConfig(over: (c: Config) => void = () => undefined): Config 
   const c = parseConfig(readFileSync(path.join(projectRoot(), "config", "fifty.example.json"), "utf8"));
   c.boundaries.account_number = SIM_ACCOUNT;
   c.universe = ["SIMA", "SIMB", "SIMC", "SIMD", "SIME", "SIMF"];
+  c.universe_lists = [];
   over(c);
   return c;
 }

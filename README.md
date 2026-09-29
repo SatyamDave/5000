@@ -53,7 +53,11 @@ cp config/fifty.example.json config/fifty.json
 Then edit `config/fifty.json`. Two things are yours to set:
 - `boundaries.account_number`: the Agentic account number. `fifty doctor` shows the last 4 digits
   of every agentic account the sign-in can see.
-- `universe`: the symbols the strategy may trade. Fifty does not pick securities for you.
+- `universe` and/or `universe_lists`: what the strategy may trade. `universe` is fixed tickers.
+  `universe_lists` names Robinhood curated lists (the example uses "Daily movers" and "Trending
+  stocks"). At precheck, the US stocks on those lists join the universe, up to 60, and stay frozen
+  for the session. Research then keeps the tradeable ones priced at or above `min_price_usd` and
+  ranks them by pre-open move. An unknown list name fails precheck.
 
 Review every other setting (see [Configuration](#configuration)).
 
@@ -124,7 +128,7 @@ broker update and error).
 | Control | Where |
 |---|---|
 | Exactly one account, which must be `agentic_allowed`, active and not deactivated. Every call carrying another `account_number` is refused before the wire | `Robinhood.verifyAccount`, `Robinhood.call` |
-| Tool allowlist: the 6 read tools, plus `place_equity_order`/`cancel_equity_order` for the runner only. No transfer, deposit, options, crypto or watchlist tool is reachable | `Robinhood` constructor |
+| Tool allowlist: the 8 read tools, plus `place_equity_order`/`cancel_equity_order` for the runner only. No transfer, deposit, options, crypto or watchlist tool is reachable | `Robinhood` constructor |
 | Spend is capped at the lower of two figures, minus `cash_reserve_usd`: (1) experiment cash = $50 + realized P&L − open cost − reserved; (2) the broker's live `buying_power`. No top-ups, no borrowing | `guard.spendable` |
 | One entry order in flight at a time, so concurrent buys cannot overspend | `guard.checkEntry` |
 | Long only. Sells never exceed what the experiment bought or what the broker says is sellable. Holdings that predate the session are recorded as a baseline and never sold | `guard.sizeExit`, precheck baseline |
@@ -188,7 +192,7 @@ shown edge. To replace it, implement the `Strategy` interface in `src/strategy/t
 - An unknown symbol is dropped, not zero-filled.
 
 **Verified in simulation only.** The simulated server enforces the real input schemas and answers
-in the real output shapes. 39 tests cover:
+in the real output shapes. 41 tests cover:
 - wrong account and overspending;
 - duplicate and ambiguous submission;
 - partial fills and restart recovery;

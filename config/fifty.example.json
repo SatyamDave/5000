@@ -7,10 +7,12 @@
     "cash_reserve_usd": 0.5
   },
   "target_usd": 5000,
-  "universe": ["REPLACE", "WITH", "YOUR", "SYMBOLS"],
+  "universe": [],
+  "universe_lists": ["Daily movers", "Trending stocks"],
   "strategy": {
     "name": "opening-range-breakout",
     "watchlist_size": 5,
+    "min_price_usd": 1,
     "opening_range_minutes": 15,
     "breakout_buffer_pct": 0.1,
     "position_size_pct": 100,

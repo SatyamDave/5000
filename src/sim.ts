@@ -45,7 +45,8 @@ export async function simulate(o: SimOptions) {
   if (!sess) throw new Error(`${o.date} is not an NYSE trading day`);
   let now = o.startMs ?? sess.openMs - ((o.startMinutesBeforeOpen ?? o.cfg.session.precheck_minutes_before_open + 1) * 60_000);
   const clock = { now: () => now, sleep: async (ms: number) => { now += Math.max(1000, ms); } };
-  const prices = o.prices ?? Object.fromEntries(o.cfg.universe.map((s, i) => [s, 5 + i * 3.7]));
+  const syms = o.cfg.universe.length ? o.cfg.universe : ["SIMA", "SIMB", "SIMC", "SIMD", "SIME", "SIMF"];
+  const prices = o.prices ?? Object.fromEntries(syms.map((s, i) => [s, 5 + i * 3.7]));
   const mock = o.mock ?? new MockRobinhood({
     account: o.mockAccount ?? o.cfg.boundaries.account_number, cash: o.cash ?? 50, prices, pricePath: o.pricePath, now: clock.now, faults: o.faults,
     holdings: o.holdings, accountType: o.accountType, fractional: o.fractional, agenticAllowed: o.agenticAllowed,

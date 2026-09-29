@@ -23,30 +23,43 @@ echo
 echo "Agentic account number (the one ending 6993; letters/digits only; input hidden; Enter keeps current):"
 read -r -s ACCT
 echo
-echo "Tickers it may trade, comma separated (e.g. XYZ,QRS; Enter keeps current):"
+echo "Tickers it may trade, comma separated (e.g. XYZ,QRS)."
+echo "Or press Enter to let the strategy choose each morning from Robinhood's \"Daily movers\" + \"Trending stocks\" lists:"
 read -r TICKERS
 
-ACCT="$ACCT" TICKERS="$TICKERS" python3 - "$CFG" <<'EOF'
+ACCT="$ACCT" TICKERS="$TICKERS" python3 - "$CFG" config/fifty.example.json <<'EOF'
 import json, os, re, sys
 path = sys.argv[1]
 c = json.load(open(path))
+example = json.load(open(sys.argv[2]))
+def fill(dst, src):  # add settings introduced after this config was copied
+    for k, v in src.items():
+        if k not in dst: dst[k] = v
+        elif isinstance(v, dict) and isinstance(dst[k], dict): fill(dst[k], v)
+fill(c, example)
 acct = os.environ["ACCT"].strip()
 if acct:
     c["boundaries"]["account_number"] = acct
 acct = c["boundaries"]["account_number"]
 if not re.fullmatch(r"[A-Za-z0-9]+", acct) or "REPLACE" in acct or acct == "YOUR_FULL_NUMBER":
     sys.exit("account number must be letters/digits only (no spaces, dashes or placeholders)")
+PLACEHOLDERS = {"REPLACE", "WITH", "YOUR", "SYMBOLS", "AAA", "BBB", "CCC"}
 t = [s.strip().upper() for s in os.environ["TICKERS"].split(",") if s.strip()]
 if t:
-    c["universe"] = t
-bad = [s for s in c["universe"] if not re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", s) or s in ("REPLACE", "WITH", "YOUR", "SYMBOLS", "AAA", "BBB", "CCC")]
-if bad or not c["universe"]:
-    sys.exit(f"replace placeholder/invalid tickers: {bad or 'none given'}")
+    c["universe"], c["universe_lists"] = t, []
+else:
+    c["universe"] = [s for s in c["universe"] if s not in PLACEHOLDERS]
+    if not c["universe"] and not c["universe_lists"]:
+        c["universe_lists"] = example["universe_lists"]
+bad = [s for s in c["universe"] if not re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", s) or s in PLACEHOLDERS]
+if bad:
+    sys.exit(f"invalid tickers: {bad}")
 with open(path, "w") as f:
     json.dump(c, f, indent=2)
     f.write("\n")
 os.chmod(path, 0o600)
-print(f"config saved: account ••••{acct[-4:]}, universe {', '.join(c['universe'])}")
+src = ", ".join(c["universe"] + [f'Robinhood list "{l}"' for l in c["universe_lists"]])
+print(f"config saved: account ••••{acct[-4:]}, universe {src}")
 EOF
 
 echo

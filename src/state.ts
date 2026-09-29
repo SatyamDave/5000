@@ -52,6 +52,8 @@ export interface SessionState {
   startBuyingPower?: number;
   accountType?: string;
   brokerageType?: string;
+  /** Symbols this session may trade: config universe + universe_lists, resolved at precheck. */
+  universe: string[];
   watchlist: string[];
   researchNotes: string[];
   orders: LocalOrder[];
@@ -99,7 +101,7 @@ export class Store {
 
 export function freshState(date: string, armedSha: string, now: number): SessionState {
   return {
-    date, phase: "PRECHECK", armedSha, startedAt: now, baseline: null, watchlist: [], researchNotes: [], orders: [], exits: {},
+    date, phase: "PRECHECK", armedSha, startedAt: now, baseline: null, universe: [], watchlist: [], researchNotes: [], orders: [], exits: {},
     strategy: {}, entries: 0, killed: false, modelCalls: 0, modelUsd: 0, flags: [], consecutiveBrokerErrors: 0, recovery: false, notes: [],
   };
 }

@@ -292,3 +292,22 @@ test("model decider: can only shrink an entry, and stops at the session spend li
   assert.ok(journal(engine.store.dir).some((e) => e.event === "decision" && /model budget exhausted/.test(e.why ?? "")));
   assert.equal(state.phase, "COMPLETE");
 });
+
+test("universe_lists: symbols come from the broker's curated list, non-stocks dropped, frozen for the session", async () => {
+  freshStateDir();
+  const cfg = testConfig((c) => { c.universe = []; c.universe_lists = ["sim MOVERS"]; });
+  const { state, mock } = await simulate({ cfg, date: DAY, pricePath: rising(OPEN), quiet: true });
+  assert.deepEqual(state.universe, ["SIMA", "SIMB", "SIMC", "SIMD", "SIME", "SIMF"]);
+  assert.ok(placements(mock.calls).length >= 2);
+  assert.ok(placements(mock.calls).every((c) => state.universe.includes(String(c.args.symbol))));
+  assert.equal(mock.calls.filter((c) => c.tool === "get_watchlist_items").length, 1, "resolved once, at precheck");
+  assert.equal(state.phase, "COMPLETE");
+});
+
+test("universe_lists: an unknown list name fails precheck instead of trading nothing or anything", async () => {
+  freshStateDir();
+  const cfg = testConfig((c) => { c.universe = []; c.universe_lists = ["No such list"]; });
+  const { state, mock } = await simulate({ cfg, date: DAY, quiet: true, maxIterations: 30 });
+  assert.equal(state.phase, "PRECHECK");
+  assert.equal(placements(mock.calls).length, 0);
+});

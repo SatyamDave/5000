@@ -29,11 +29,17 @@ export const ConfigSchema = z.object({
   }).strict(),
   /** Scoreboard only: reported, never used to size or loosen anything. */
   target_usd: z.number().positive(),
-  universe: z.array(z.string().regex(/^[A-Z][A-Z0-9.]{0,9}$/)).min(1).max(40),
+  /** Symbols the strategy may trade. May be empty when universe_lists is set. */
+  universe: z.array(z.string().regex(/^[A-Z][A-Z0-9.]{0,9}$/)).max(40),
+  /** Robinhood curated list names (get_popular_watchlists, e.g. "Daily movers"). Their US stock
+   *  symbols are added to the universe once, at precheck, and frozen for the session. */
+  universe_lists: z.array(z.string().min(1)).max(5),
   strategy: z.object({
     name: z.enum(["opening-range-breakout"]),
     /** Pre-open research keeps this many symbols from the universe. */
     watchlist_size: z.number().int().min(1).max(20),
+    /** Research drops symbols trading below this (fractional shares need > $1). */
+    min_price_usd: z.number().min(0),
     opening_range_minutes: z.number().int().min(1).max(120),
     breakout_buffer_pct: pct,
     /** Fraction of available experiment cash per entry (concentration). 100 = all-in. */
@@ -79,7 +85,10 @@ export const ConfigSchema = z.object({
     /** If positions remain after the close, sell them (exit-only) at the next session's open. */
     recovery_flatten_next_session: z.boolean(),
   }).strict().refine((s) => s.entry_cutoff_minutes_before_close >= s.flatten_minutes_before_close, "entry cutoff must come before flatten"),
-}).strict();
+}).strict().refine((c) => c.universe.length > 0 || c.universe_lists.length > 0, "set universe symbols or universe_lists");
+
+/** Most symbols the resolved universe may hold (quote/tradability batching, research cost). */
+export const MAX_UNIVERSE = 60;
 
 export type Config = z.infer<typeof ConfigSchema>;
 

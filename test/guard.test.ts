@@ -17,6 +17,7 @@ function state() {
   const s = freshState("2026-09-30", "x", NOW);
   s.phase = "ACTIVE";
   s.watchlist = ["SIMA"];
+  s.universe = ["SIMA"];
   return s;
 }
 

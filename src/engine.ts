@@ -11,6 +11,7 @@ import { RobinhoodToolError } from "./broker/robinhood.js";
 import type { BrokerOrder, PlaceRequest, Position, Quote, Robinhood, Tradability } from "./broker/robinhood.js";
 import { isoNy, nextSessionAfter, sessionOn } from "./calendar.js";
 import type { Session } from "./calendar.js";
+import { MAX_UNIVERSE } from "./config.js";
 import type { Config } from "./config.js";
 import type { Reviewer } from "./decider/claude.js";
 import { checkEntry, entryBlock, OPEN_STATUSES, quoteProblem, sizeExit, spendable } from "./guard.js";
@@ -208,7 +209,12 @@ export class Engine {
         this.s.startBuyingPower = pf.buyingPower;
       }
       if (positions.some((p) => p.quantity < 0)) throw new Error("account holds a short position; refusing to run");
-      const trad = await rh.tradability(this.d.cfg.universe, acct.brokerageType);
+      if (!this.s.universe.length) {
+        const fromLists = await rh.listSymbols(this.d.cfg.universe_lists);
+        this.s.universe = [...new Set([...this.d.cfg.universe, ...fromLists])].slice(0, MAX_UNIVERSE);
+        this.log("universe", { symbols: this.s.universe, from_lists: this.d.cfg.universe_lists, list_symbols: fromLists.length });
+      }
+      const trad = await rh.tradability(this.s.universe, acct.brokerageType);
       for (const t of trad) this.trad.set(t.symbol, t);
       this.buyingPower = pf.buyingPower;
       const notes = [
@@ -233,9 +239,9 @@ export class Engine {
   private async research(): Promise<boolean> {
     try {
       const rh = await this.client();
-      const quotes = await rh.quotes(this.d.cfg.universe);
-      if (this.trad.size === 0) for (const t of await rh.tradability(this.d.cfg.universe, this.s.brokerageType)) this.trad.set(t.symbol, t);
-      const result = this.strategy.research({ now: this.now, quotes, tradability: [...this.trad.values()], config: this.d.cfg.strategy, universe: this.d.cfg.universe });
+      const quotes = await rh.quotes(this.s.universe);
+      if (this.trad.size === 0) for (const t of await rh.tradability(this.s.universe, this.s.brokerageType)) this.trad.set(t.symbol, t);
+      const result = this.strategy.research({ now: this.now, quotes, tradability: [...this.trad.values()], config: this.d.cfg.strategy, universe: this.s.universe });
       this.s.watchlist = result.watchlist;
       this.s.researchNotes = result.notes;
       this.log("research", { watchlist: result.watchlist, notes: result.notes, evidence_at: quotes.map((q) => [q.symbol, new Date(q.asOfMs).toISOString()]) });
@@ -395,7 +401,7 @@ export class Engine {
     if (this.trad.size === 0 && !this.s.recovery) {
       // After a restart the in-memory tradability cache is empty; reload before any entry.
       try {
-        for (const t of await (await this.client()).tradability(this.d.cfg.universe, this.s.brokerageType)) this.trad.set(t.symbol, t);
+        for (const t of await (await this.client()).tradability(this.s.universe, this.s.brokerageType)) this.trad.set(t.symbol, t);
       } catch (err) {
         this.brokerFailed(err, "tradability");
         return;

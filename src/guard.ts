@@ -60,7 +60,7 @@ export function checkEntry(args: {
   now: number;
 }): EntryOrder {
   const { proposal: p, cfg, state, books: b, quote: q, tradability: t, now } = args;
-  if (!cfg.universe.includes(p.symbol) || !state.watchlist.includes(p.symbol)) return { ok: false, reason: `${p.symbol} is outside the configured universe/watchlist` };
+  if (!state.universe.includes(p.symbol) || !state.watchlist.includes(p.symbol)) return { ok: false, reason: `${p.symbol} is outside the configured universe/watchlist` };
   if (!t || !t.tradeable || t.halted || !t.accountTypeOk) return { ok: false, reason: `${p.symbol} is not tradeable for this account right now` };
   const qp = quoteProblem(q, cfg, now);
   if (qp) return { ok: false, reason: `${p.symbol}: ${qp}` };

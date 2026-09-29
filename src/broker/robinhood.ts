@@ -37,6 +37,8 @@ export const READ_TOOLS = [
   "get_equity_orders",
   "get_equity_quotes",
   "get_equity_tradability",
+  "get_popular_watchlists",
+  "get_watchlist_items",
 ] as const;
 export const TRADE_TOOLS = ["place_equity_order", "cancel_equity_order"] as const;
 
@@ -290,6 +292,24 @@ export class Robinhood {
     return list("get_accounts", data, "accounts")
       .filter((a) => a.agentic_allowed === true && typeof a.account_number === "string")
       .map((a) => `••••${(a.account_number as string).slice(-4)} type=${String(a.type)} state=${String(a.state)}`);
+  }
+
+  /** US stock symbols on the named Robinhood curated lists (case-insensitive names). Throws when a
+   *  named list does not exist, so a typo never silently means "trade nothing" or "trade anything". */
+  async listSymbols(names: string[]): Promise<string[]> {
+    if (!names.length) return [];
+    const lists = list("get_popular_watchlists", await this.call("get_popular_watchlists", {}), "lists");
+    const out: string[] = [];
+    for (const name of names) {
+      const match = lists.find((l) => String(l.display_name).toLowerCase() === name.toLowerCase());
+      if (!match || typeof match.id !== "string") throw new Error(`Robinhood list "${name}" not found; available: ${lists.map((l) => String(l.display_name)).join(", ")}`);
+      const items = list("get_watchlist_items", await this.call("get_watchlist_items", { list_id: match.id }), "items");
+      for (const it of items) {
+        const sym = str(it.symbol);
+        if (it.object_type === "instrument" && sym && /^[A-Z][A-Z0-9.]{0,9}$/.test(sym) && !out.includes(sym)) out.push(sym);
+      }
+    }
+    return out;
   }
 
   async portfolio(): Promise<Portfolio> {

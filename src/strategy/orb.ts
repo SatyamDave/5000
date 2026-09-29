@@ -25,7 +25,7 @@ export const openingRangeBreakout: Strategy = {
     const ok = new Set(input.tradability.filter((t) => t.tradeable && !t.halted && t.accountTypeOk && t.state !== "inactive").map((t) => t.symbol));
     const notes: string[] = [];
     const ranked = input.quotes
-      .filter((q) => ok.has(q.symbol) && q.previousClose > 0 && q.state === "active")
+      .filter((q) => ok.has(q.symbol) && q.previousClose > 0 && q.state === "active" && (q.preMarket ?? q.last) >= input.config.min_price_usd)
       .map((q) => ({ q, move: ((q.preMarket ?? q.last) - q.previousClose) / q.previousClose }))
       .sort((a, b) => Math.abs(b.move) - Math.abs(a.move) || a.q.symbol.localeCompare(b.q.symbol));
     for (const s of input.universe) if (!ok.has(s)) notes.push(`${s}: excluded (not tradeable, halted or not allowed for this account type)`);

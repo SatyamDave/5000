@@ -225,6 +225,14 @@ export class MockRobinhood {
           extended_hours_fractional_tradability: false, state: "active",
           account_type_tradabilities: [{ account_type: "individual", account_type_tradability: "tradable" }],
         })) });
+      case "get_popular_watchlists":
+        return this.ok({ lists: [{ id: "sim-movers", display_name: "Sim movers", item_count: Object.keys(this.opts.prices).length }] });
+      case "get_watchlist_items":
+        if (args.list_id !== "sim-movers") return this.err("list not found");
+        return this.ok({ has_futures_contracts: false, items: [
+          ...Object.keys(this.opts.prices).map((s) => ({ object_id: `inst-${s}`, object_type: "instrument", symbol: s })),
+          { object_id: "btc", object_type: "currency_pair", symbol: "BTC-USD" },
+        ] });
       case "place_equity_order":
         return this.place(args);
       case "cancel_equity_order": {
