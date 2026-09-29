@@ -34,7 +34,8 @@ ${args.map((a) => `    <string>${xml(a)}</string>`).join("\n")}
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:${xml(path.dirname(process.execPath))}</string>
-    <key>FIFTY_STATE_DIR</key><string>${xml(stateDir())}</string>
+    <key>FIFTY_STATE_DIR</key><string>${xml(stateDir())}</string>${process.env.FIFTY_TOKEN_PATH ? `
+    <key>FIFTY_TOKEN_PATH</key><string>${xml(path.resolve(process.env.FIFTY_TOKEN_PATH))}</string>` : ""}
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
